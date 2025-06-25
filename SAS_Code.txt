@@ -1,0 +1,668 @@
+/* Project */
+
+Title "Output"; Run;
+
+/* Import the CSV file */
+PROC IMPORT DATAFILE="C:\Users\mukes\OneDrive\Desktop\SAS + R Project\Airline_Delay_Cause.csv"
+    OUT=airlinedata
+    DBMS=CSV
+    REPLACE;
+    GETNAMES=YES;
+RUN;
+
+
+/* Check dataset structure */
+PROC CONTENTS DATA=airlinedata; RUN;
+
+/* Check for missing values */
+PROC MEANS DATA=airlinedata N NMISS; RUN;
+
+/* Replace missing numeric delay and count fields with 0 */
+DATA airlinedata_clean;
+    SET airlinedata;
+    ARRAY num_vars[*] arr_flights arr_del15 carrier_ct weather_ct nas_ct security_ct late_aircraft_ct
+                       arr_cancelled arr_diverted arr_delay carrier_delay weather_delay nas_delay
+                       security_delay late_aircraft_delay;
+    DO i = 1 TO DIM(num_vars);
+        IF num_vars[i] = . THEN num_vars[i] = 0;
+    END;
+    DROP i;
+RUN;
+
+/* Confirm cleanup */
+PROC MEANS DATA=airlinedata_clean N NMISS; RUN;
+
+/* Outlier Detection and Removal of Extreme outliers */
+
+	/* Run PROC UNIVARIATE on all numeric variables */
+PROC UNIVARIATE DATA=airlinedata_clean;
+    VAR arr_flights arr_del15 arr_cancelled arr_diverted arr_delay
+        carrier_ct carrier_delay weather_ct weather_delay
+        nas_ct nas_delay security_ct security_delay
+        late_aircraft_ct late_aircraft_delay;
+    OUTPUT OUT=outlier_summary
+        PCTLPTS = 1 5 25 50 75 95 99
+        PCTLPRE = P1_ P5_ P25_ P50_ P75_ P95_ P99_;
+RUN;
+
+Title 'output'; run;
+
+
+/* Create visual boxplots for all numeric variables */
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX arr_flights;
+    TITLE "Boxplot: Arriving Flights";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX arr_del15;
+    TITLE "Boxplot: Flights Delayed 15+ Min";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX arr_cancelled;
+    TITLE "Boxplot: Cancelled Flights";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX arr_diverted;
+    TITLE "Boxplot: Diverted Flights";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX arr_delay;
+    TITLE "Boxplot: Arrival Delay Minutes";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX carrier_ct;
+    TITLE "Boxplot: Carrier Delay Count";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX carrier_delay;
+    TITLE "Boxplot: Carrier Delay Minutes";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX weather_ct;
+    TITLE "Boxplot: Weather Delay Count";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX weather_delay;
+    TITLE "Boxplot: Weather Delay Minutes";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX nas_ct;
+    TITLE "Boxplot: NAS Delay Count";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX nas_delay;
+    TITLE "Boxplot: NAS Delay Minutes";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX security_ct;
+    TITLE "Boxplot: Security Delay Count";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX security_delay;
+    TITLE "Boxplot: Security Delay Minutes";
+RUN;
+
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX late_aircraft_ct;
+    TITLE "Boxplot: Late Aircraft Delay Count";
+RUN;
+Title "Output"; Run;
+PROC SGPLOT DATA=airlinedata_clean;
+    VBOX late_aircraft_delay;
+    TITLE "Boxplot: Late Aircraft Delay Minutes";
+RUN;
+
+Title "Output"; Run;
+
+/* Removing only the High End Extreme Outliers */
+Title "Output"; Run;
+DATA airlinedata_trimmed;
+    SET airlinedata_clean;
+    IF arr_flights <= 4858 AND
+       arr_del15 <= 933 AND
+       arr_cancelled <= 72 AND
+       arr_diverted <= 13 AND
+       arr_delay <= 69712 AND
+       carrier_ct <= 276.49 AND
+       carrier_delay <= 22671 AND
+       weather_ct <= 36.45 AND
+       weather_delay <= 4573 AND
+       nas_ct <= 273.58 AND
+       nas_delay <= 14325 AND
+       security_ct <= 3.43 AND
+       security_delay <= 158 AND
+       late_aircraft_ct <= 381.51 AND
+       late_aircraft_delay <= 30414;
+RUN;
+Title "Output"; Run;
+/* Check the final number of records */
+Title "Output"; Run;
+PROC MEANS DATA=airlinedata_trimmed N;
+RUN;
+Title "Output"; Run;
+/* Creating New Variables */
+DATA airlinedata_final;
+    SET airlinedata_trimmed;
+
+    /* (1️) DelayRate: Standardizes total delay proportion over total flights */
+    IF arr_flights > 0 THEN DelayRate = arr_delay / arr_flights;
+    ELSE DelayRate = 0;
+
+    /* (2️) MajorDelayCause: Identify main delay reason (by highest cause count) */
+    ARRAY delay_causes[5] carrier_delay weather_delay nas_delay security_delay late_aircraft_delay;
+    ARRAY cause_names[5] $20 _TEMPORARY_ ('Carrier', 'Weather', 'NAS', 'Security', 'LateAircraft');
+    MajorDelayCause = 'None';
+    max_delay = 0;
+
+    DO i = 1 TO DIM(delay_causes);
+        IF delay_causes[i] > max_delay THEN DO;
+            max_delay = delay_causes[i];
+            MajorDelayCause = cause_names[i];
+        END;
+    END;
+    DROP i max_delay;
+
+    /* (3️) BusyAirportFlag: Mark top airports (example: major hubs, if arr_flights > threshold) */
+    IF arr_flights > 2196 THEN BusyAirportFlag = 1;
+    ELSE BusyAirportFlag = 0;
+
+
+
+    /* (4️)CarrierSizeCategory: 3 Level Class Variable */
+	
+  LENGTH CarrierSizeCategory $6;
+
+    IF carrier_ct <= 5 THEN CarrierSizeCategory = "Small";
+    ELSE IF carrier_ct <= 20 THEN CarrierSizeCategory = "Medium";
+    ELSE CarrierSizeCategory = "Big";
+RUN;
+
+
+/* (5️)SeasonalQuarter: Assign quarter based on month */
+DATA airlinedata_final;
+    SET airlinedata_final; 
+    if month IN (1, 2, 3) THEN SeasonalQuarter = 'Q1';
+    ELSE IF month IN (4, 5, 6) THEN SeasonalQuarter = 'Q2';
+    ELSE IF month IN (7, 8, 9) THEN SeasonalQuarter = 'Q3';
+    ELSE IF month IN (10, 11, 12) THEN SeasonalQuarter = 'Q4';
+    ELSE SeasonalQuarter = 'Unknown';
+RUN;
+
+
+/* Check new variables */
+Title "Output"; Run;
+PROC CONTENTS DATA=airlinedata_final; RUN;
+Title "Output"; Run;
+
+Title "Output"; Run;
+PROC MEANS DATA=airlinedata_final N MEAN MIN MAX; 
+    VAR DelayRate BusyAirportFlag BigCarrierFlag;
+RUN;
+Title "Output"; Run;
+
+Title "Output"; Run;
+PROC FREQ DATA=airlinedata_final; 
+    TABLES MajorDelayCause SeasonalQuarter;
+RUN;
+Title "Output"; Run;
+
+Proc print data=airlinedata_final; run;
+
+
+
+/* Generate individual histograms for each numeric variable */
+%let varlist = arr_flights arr_del15 arr_cancelled arr_diverted arr_delay
+               carrier_ct weather_ct nas_ct security_ct late_aircraft_ct
+               carrier_delay weather_delay nas_delay security_delay late_aircraft_delay
+               DelayRate BusyAirportFlag BigCarrierFlag;
+
+%macro plot_histograms;
+    %let count = 1;
+    %do %while (%scan(&varlist, &count) ne );
+        %let var = %scan(&varlist, &count);
+        
+        proc sgplot data=airlinedata_final;
+            histogram &var;
+            title "Histogram: &var";
+        run;
+        
+        %let count = %eval(&count + 1);
+    %end;
+%mend;
+
+%plot_histograms;
+
+/* Create log-transformed variables */
+DATA airlinedata_final_log;
+    SET airlinedata_final;
+
+    log_arr_flights         = LOG(arr_flights + 1);
+    log_arr_del15           = LOG(arr_del15 + 1);
+    log_arr_cancelled       = LOG(arr_cancelled + 1);
+    log_arr_diverted        = LOG(arr_diverted + 1);
+    log_arr_delay           = LOG(arr_delay + 1);
+    log_carrier_ct          = LOG(carrier_ct + 1);
+    log_weather_ct          = LOG(weather_ct + 1);
+    log_nas_ct             = LOG(nas_ct + 1);
+    log_security_ct         = LOG(security_ct + 1);
+    log_late_aircraft_ct    = LOG(late_aircraft_ct + 1);
+    log_carrier_delay       = LOG(carrier_delay + 1);
+    log_weather_delay       = LOG(weather_delay + 1);
+    log_nas_delay          = LOG(nas_delay + 1);
+    log_security_delay      = LOG(security_delay + 1);
+    log_late_aircraft_delay = LOG(late_aircraft_delay + 1);
+    log_DelayRate           = LOG(DelayRate + 1);
+
+RUN;
+
+
+/* Log-Transformed Classification of Carrier Size Based on log_carrier_ct */
+
+DATA airlinedata_final_log;
+    SET airlinedata_final_log;
+
+    LENGTH LogCarrierSize $6;
+
+    IF log_carrier_ct <= 1.5 THEN LogCarrierSize = "Small";
+    ELSE IF log_carrier_ct <= 3.2 THEN LogCarrierSize = "Medium";
+    ELSE LogCarrierSize = "Big";
+RUN;
+
+PROC FREQ DATA=airlinedata_final_log;
+    TABLES LogCarrierSize;
+RUN;
+
+/* Check the new log transformed variables */
+Title "Output"; Run;
+PROC CONTENTS DATA=airlinedata_final_log; RUN;
+Title "Output"; Run;
+
+/* Quickly check summary */
+Title "Output"; Run;
+PROC MEANS DATA=airlinedata_final_log N MEAN STD MIN MAX;
+    VAR log_:;
+RUN;
+Title "Output"; Run;
+
+/* Generate histograms for log-transformed variables */
+%let logvarlist = log_arr_flights log_arr_del15 log_arr_cancelled log_arr_diverted log_arr_delay
+                  log_carrier_ct log_weather_ct log_nas_ct log_security_ct log_late_aircraft_ct
+                  log_carrier_delay log_weather_delay log_nas_delay log_security_delay
+                  log_late_aircraft_delay log_DelayRate;
+
+%macro plot_histograms;
+    %let i = 1;
+    %do %while(%scan(&logvarlist, &i) ne );
+        %let var = %scan(&logvarlist, &i);
+
+        PROC SGPLOT DATA=airlinedata_final_log;
+            HISTOGRAM &var;
+            TITLE "Histogram of &var";
+        RUN;
+
+        %let i = %eval(&i + 1);
+    %end;
+%mend;
+
+%plot_histograms;
+
+
+/* Descriptive Analysis on Log-Transformed Variables */
+
+/* Log-transformed numeric variables */
+%let log_varlist = log_arr_flights log_arr_del15 log_arr_cancelled log_arr_diverted log_arr_delay
+                   log_carrier_ct log_weather_ct log_nas_ct log_security_ct log_late_aircraft_ct
+                   log_carrier_delay log_weather_delay log_nas_delay log_security_delay
+                   log_late_aircraft_delay log_DelayRate;
+
+/* PROC MEANS */
+Title "Output"; Run;
+PROC MEANS DATA=airlinedata_final_log N MEAN STD MIN MAX;
+    VAR &log_varlist;
+    TITLE "Descriptive Statistics: Log-Transformed Variables";
+RUN;
+Title "Output"; Run;
+
+/* PROC FREQ */
+PROC FREQ DATA=airlinedata_final_log;
+    TABLES LogCarrierSize;
+RUN;
+
+/* PROC SUMMARY with variable-specific names */
+Title "Output"; Run;
+PROC SUMMARY DATA=airlinedata_final_log NWAY;
+    CLASS MajorDelayCause;
+    VAR log_arr_delay;
+    OUTPUT OUT=summary_by_cause
+        N=Count_
+        MEAN=Mean_
+        STD=StdDev_
+        MIN=Min_
+        MAX=Max_;
+    TITLE "Summary Statistics by Major Delay Cause (Log-Transformed Variables)";
+RUN;
+Title "Output"; Run;
+
+Title "Output"; Run;
+PROC SUMMARY DATA=airlinedata_final_log NWAY;
+    CLASS LogCarrierSize;
+    VAR log_DelayRate;
+    OUTPUT OUT=delay_summary_by_size
+        N=Count
+        MEAN=Mean_Delay
+        STD=StdDev_Delay
+        MIN=Min_Delay
+        MAX=Max_Delay;
+    TITLE "Summary Statistics of Log(Delay Rate) by LogCarrierSize";
+RUN;
+Title "Output"; Run;
+
+Title "Output"; Run;
+PROC PRINT DATA=summary_by_cause LABEL NOOBS;
+    VAR MajorDelayCause Count_ Mean_ StdDev_ Min_ Max_;
+    
+    LABEL MajorDelayCause = "Major Delay Cause"
+          Count_ = "Number of Observations"
+          Mean_ = "Overall Mean"
+          StdDev_ = "Overall Std Dev"
+          Min_ = "Overall Minimum"
+          Max_ = "Overall Maximum";
+    
+    TITLE "Summary Table: Mean and Variability of Delay Metrics by Major Delay Cause";
+RUN;
+Title "Output"; Run;
+
+Title "Output"; 
+PROC PRINT DATA=delay_summary_by_size NOOBS LABEL;
+    VAR LogCarrierSize Count Mean_Delay StdDev_Delay Min_Delay Max_Delay;
+
+    LABEL 
+        LogCarrierSize = "Carrier Class (Log-Based)"
+        Count = "Number of Observations"
+        Mean_Delay = "Mean Log(Delay Rate)"
+        StdDev_Delay = "Std Dev"
+        Min_Delay = "Minimum"
+        Max_Delay = "Maximum";
+
+RUN;
+Title "Output"; 
+
+/* PROC UNIVARIATE: Univariate Analysis for Rare Events */
+Title "Output"; Run;
+PROC UNIVARIATE DATA=airlinedata_final_log;
+    VAR log_arr_cancelled log_arr_diverted;
+    TITLE "Univariate Analysis of Log(Cancelled) and Log(Diverted) Flights";
+RUN;
+Title "Output"; Run;
+
+/* Correlation Statistics (No Trendline) */
+Title "Output"; Run;
+PROC CORR DATA=airlinedata_final_log;
+    VAR log_DelayRate log_carrier_delay;
+    TITLE "Correlation Between Delay Rate and Carrier-Caused Delay (Log-Transformed)";
+RUN;
+Title "Output"; Run;
+
+
+/* Custom Scatter Plot with Trendline */
+Title "Output"; Run;
+PROC SGPLOT DATA=airlinedata_final_log;
+    SCATTER X=log_carrier_delay Y=log_DelayRate;
+    REG X=log_carrier_delay Y=log_DelayRate / LINEATTRS=(COLOR=red THICKNESS=2);
+    TITLE "Scatter Plot with Trendline: Log(Delay Rate) vs. Log(Carrier-Caused Delay)";
+RUN;
+Title "Output"; Run;
+
+
+/* ANOVA for key log-transformed delay time variables by SeasonalQuarter */
+Title "Output"; Run;
+%let log_varlist = log_arr_delay log_DelayRate 
+                   log_carrier_delay log_weather_delay 
+                   log_nas_delay log_security_delay 
+                   log_late_aircraft_delay;
+
+%macro run_anova_log;
+    %let i = 1;
+    %do %while(%scan(&log_varlist, &i) ne );
+        %let var = %scan(&log_varlist, &i);
+
+        PROC GLM DATA=airlinedata_final_log;
+            CLASS SeasonalQuarter;
+            MODEL &var = SeasonalQuarter;
+            MEANS SeasonalQuarter / TUKEY;
+            TITLE "ANOVA on &var by Seasonal Quarter (Key Delay Time Metrics)";
+        RUN;
+
+        %let i = %eval(&i + 1);
+    %end;
+%mend;
+
+%run_anova_log;
+
+Title "Output"; Run;
+
+
+/* Clustering Analysis */
+
+proc cluster data=airlinedata_final_log method=ward print=7 ccc pseudo outtree=tree_out;
+    var log_carrier_delay log_weather_delay log_nas_delay log_late_aircraft_delay log_DelayRate;
+    copy DelayRate;
+run;
+
+proc tree data=tree_out out=clustered_delays ncl=3; /*  ncl=3 is selected based on significant jump in R-square values */
+    copy log_carrier_delay log_weather_delay log_nas_delay log_late_aircraft_delay log_DelayRate;
+run;
+
+proc sgplot data=clustered_delays;
+    reg x=log_carrier_delay y=log_DelayRate / group=cluster;
+    title "Hierarchical Clustering: log_carrier_delay vs. log_DelayRate with Trend Lines";
+run;
+
+proc sgplot data=clustered_delays;
+    reg x=log_weather_delay y=log_DelayRate / group=cluster;
+    title "Hierarchical Clustering: log_weather_delay vs. log_DelayRate with Trend Lines";
+run;
+
+proc sgplot data=clustered_delays;
+    reg x=log_nas_delay y=log_DelayRate / group=cluster;
+    title "Hierarchical Clustering: log_nas_delay vs. log_DelayRate with Trend Lines";
+run;
+
+proc sgplot data=clustered_delays;
+    reg x=log_late_aircraft_delay y=log_DelayRate / group=cluster;
+    title "Hierarchical Clustering: log_late_aircraft_delay vs. log_DelayRate with Trend Lines";
+run;
+
+
+
+proc fastclus data=airlinedata_final_log out=km_clusters maxclusters=3;
+    var log_carrier_delay log_weather_delay log_nas_delay log_late_aircraft_delay log_DelayRate;
+run;
+
+proc sgplot data=km_clusters;
+    reg x=log_carrier_delay y=log_DelayRate / group=cluster;
+run;
+
+proc sgplot data=km_clusters;
+    reg x=log_weather_delay y=log_carrier_delay / group=cluster;
+run;
+
+proc means data=km_clusters;
+    class cluster;
+    var log_carrier_delay log_weather_delay log_nas_delay log_late_aircraft_delay log_DelayRate;
+run;
+
+proc anova data=km_clusters;
+    class cluster;
+    model log_DelayRate = cluster;
+    means cluster / bon;
+run;
+
+
+
+title "output"; run;
+
+/* Regression Models */
+
+	/* Simple Regression: Delay Rate vs. Carrier Delay */
+
+title "output"; run;
+proc reg data=airlinedata_final_log;
+    model log_DelayRate = log_carrier_delay;
+    output out=simple_reg_out p=predicted r=residual;
+    title "Simple Linear Regression: log_DelayRate vs. log_carrier_delay";
+run;
+
+proc sgplot data=simple_reg_out;
+    scatter x=predicted y=residual;
+    refline 0 / axis=y;
+    title "Residual Plot";
+run;
+
+data accuracy_simple;
+    set simple_reg_out;
+    abs_error = abs(residual);
+    pct_error = abs(residual / log_DelayRate);
+run;
+
+proc means data=accuracy_simple mean;
+    var abs_error pct_error;
+    title "MAE and MAPE for Simple Regression";
+run;
+
+
+
+title "output"; run;
+
+
+	/* Multiple Regrssion Model */
+
+title "output"; run;
+proc glmselect data=airlinedata_final_log;
+    class SeasonalQuarter LogCarrierSize BusyAirportFlag;
+    model log_DelayRate = log_carrier_delay log_weather_delay log_nas_delay 
+                          log_security_delay log_late_aircraft_delay 
+                          SeasonalQuarter BusyAirportFlag LogCarrierSize;
+    output out=multi_reg_out p=predicted r=residual;
+run;
+
+data accuracy_multi;
+    set multi_reg_out;
+    abs_error = abs(residual);
+    pct_error = abs(residual / log_DelayRate);
+run;
+
+proc means data=accuracy_multi mean;
+    var abs_error pct_error;
+    title "MAE and MAPE for Multiple Regression";
+run;
+
+data accuracy_multi;
+    set multi_reg_out;
+    sq_error = residual**2;
+run;
+
+proc means data=accuracy_multi mean;
+    var sq_error;
+run;
+
+
+title "output"; run;
+
+
+
+
+proc export data=airlinedata_final_log
+    outfile="C:\Users\APAWAR6\Desktop\ECO520 Project\Dataset/airlinedata_final_log.csv"
+    dbms=csv
+    replace;
+run;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
