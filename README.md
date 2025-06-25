@@ -120,7 +120,7 @@ The results inform **data-driven decision-making** for aviation stakeholders see
 
 ## 📬 Contact
 
-Let’s connect on or email for feedback, collaboration, or discussion.
+Feel free to connect or reach out via LinkedIn for feedback or collaboration opportunities.
 
 ---
 
