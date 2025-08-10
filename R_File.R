@@ -9,6 +9,9 @@ str(airlinedata_final_log)
 
 # Step-wise Logistic Regression Model
 # Load Libraries
+install.packages("pROC")
+install.packages("caret")
+install.packages("ggplot2")
 library(pROC)
 library(caret)
 library(ggplot2)
@@ -180,6 +183,7 @@ roc_obj <- roc(actual, rf_probs)
 plot(roc_obj, main = "Random Forest (mtry = 1, ntree = 897) - ROC Curve")
 auc_val <- auc(roc_obj)
 cat(sprintf("AUC: %.4f\n", auc_val))
+
 
 
 
